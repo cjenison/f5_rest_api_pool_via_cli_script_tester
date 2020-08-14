@@ -37,37 +37,32 @@ def query_yes_no(question, default="no"):
             sys.stdout.write("Please respond with 'yes' or 'no' (or 'y' or 'n').\n")
 
 #Setup command line arguments using Python argparse
-parser = argparse.ArgumentParser(description='A tool to identify expiring and soon to expire certs and related config detritus and assist user with pruning it from configuration')
+parser = argparse.ArgumentParser(description='A tool to measure bulk pool adds/removes')
 parser.add_argument('--bigip', help='IP or hostname of BIG-IP Management or Self IP', required=True)
 parser.add_argument('--user', help='username to use for authentication', required=True)
-parser.add_argument('--loops', help='Number of loops', type=int, default=1)
-parser.add_argument('--poolmembers', help='Number of pool members to create', type=int, default=2)
-parser.add_argument('--poolipprefix', help='IP Prefix for pool members', default="192.168.100.10")
-parser.add_argument('--buildconfig', help='Add pool and virtual in each loop', action='store_true')
-parser.add_argument('--items', help='Items to retrieve when using topskip mode', default=50)
-parser.add_argument('--itemoutput', help='Print item names', default=False)
-parser.add_argument('--getlist', help='Get list of objects before creating objects', action='store_true')
-parser.add_argument('--singlerequest', action='store_true', help='Retrieve Config Objects using a single HTTP request')
-parser.add_argument('--poolbulk', action='store_true', help='Create Pool and include members using one HTTP request')
-parser.add_argument('--topskip', action='store_true', help='Retrieve Config Objects iteratively using top and skip filters')
+parser.add_argument('--poolName', help='BIG-IP Pool Name to Modify', required=True)
+parser.add_argument('--members', help='Number of members to add or remove', type=int, default=10)
+mode = parser.add_mutually_exclusive_group(required=True)
+mode.add_argument('--add', action=help="Add Pool Members to Pool", action='store_true')
+mode.add_argument('--delete', help="Delete Pool Members to Pool", action='store_true')
+parser.add_argument('--poolipprefix', help='IP Prefix for pool members')
+parser.add_argument('--interval', help='Time in seconds to pause between individual pool member changes', default=0) 
+restmode = parser.add_mutually_exclusive_group(required=True)
+restmode.add_argument('--passthrough', help="When each member change is requested, make iControl REST request", action='store_true')
+restmode.add_argument('--defer', help="Defer iControl REST requests until all can be submitted immediately", action='store_true')
 
 args = parser.parse_args()
 contentJsonHeader = {'Content-Type': "application/json"}
 filename = ''
-poolprefix = 'pool'
 virtualprefix = 'virtual'
 cliScriptName = 'pool-add-remove-members'
-poolerrorcount = 0
-virtualerrorcount = 0
-membererrorcount = 0
-restgetcount = 0
-restgetexecutiontime = 0
 ## Below two variables are set at extremes to catch best case and worst case execution
 restgetbest = 1000
 restgetworst = 0
 restpostcount = 0
 restpostexecutiontime = 0
 restdeletecount = 0
+
 scriptbegin = time.time()
 
 def get_auth_token(bigip, username, password):
