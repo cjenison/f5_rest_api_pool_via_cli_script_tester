@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 # f5_rest_api_pool_via_cli_script_tester.py
 # Author: Chad Jenison (c.jenison at f5.com)
-# Version 1.0
+# Version 1.1
 #
 # Script that uses F5 BIG-IP iControl REST API to Add Pools and Virtual Servers after listing all virtuals
 
