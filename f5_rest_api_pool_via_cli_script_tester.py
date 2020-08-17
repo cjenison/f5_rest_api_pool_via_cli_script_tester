@@ -133,7 +133,9 @@ if args.defer:
 ## Submit the transaction
 submitTransactionPayload = {}
 submitTransactionPayload['state'] = "VALIDATING"
+print ("Submit Transaction Payload: %s" % (submitTransactionPayload))
 submitTransaction = bip.patch('%s/transaction/%s' % (url_base, transactionId), headers=contentJsonHeader, data=json.dumps(submitTransactionPayload)).json()
+
 
 
 scriptend = time.time()
