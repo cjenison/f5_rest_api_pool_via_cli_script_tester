@@ -90,7 +90,6 @@ def get_auth_token(bigip, username, password):
     return token
 
 user = args.user
-print ('Args.password: %s' % (args.password))
 if args.password == '':
     password = getpass.getpass("Password for " + user + ":")
 else:
