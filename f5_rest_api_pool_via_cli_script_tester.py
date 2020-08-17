@@ -43,10 +43,10 @@ parser.add_argument('--user', help='username to use for authentication', require
 parser.add_argument('--poolName', help='BIG-IP Pool Name to Modify', required=True)
 parser.add_argument('--members', help='Number of members to add or remove', type=int, default=10)
 mode = parser.add_mutually_exclusive_group(required=True)
-mode.add_argument('--add', action=help="Add Pool Members to Pool", action='store_true')
-mode.add_argument('--delete', help="Delete Pool Members to Pool", action='store_true')
+mode.add_argument('--add', help='Add Pool Members to Pool', action='store_true')
+mode.add_argument('--delete', help='Delete Pool Members to Pool', action='store_true')
 parser.add_argument('--poolipprefix', help='IP Prefix for pool members')
-parser.add_argument('--interval', help='Time in seconds to pause between individual pool member changes', default=0) 
+parser.add_argument('--interval', type=int, help='Time in seconds to pause between individual pool member changes', default=0) 
 restmode = parser.add_mutually_exclusive_group(required=True)
 restmode.add_argument('--passthrough', help="When each member change is requested, make iControl REST request", action='store_true')
 restmode.add_argument('--defer', help="Defer iControl REST requests until all can be submitted immediately", action='store_true')
@@ -88,75 +88,6 @@ def get_auth_token(bigip, username, password):
         quit()
     return token
 
-def deletePoolPlusVirtual(index):
-    global restdeletecount
-    bip.delete('%s/ltm/virtual/%s%s' % (url_base, virtualprefix, index))
-    bip.delete('%s/ltm/pool/%s%s' % (url_base, poolprefix, index))
-    restdeletecount += 2
-    print('Deleted Pool: %s%s - Deleted Virtual: %s%s' % (poolprefix, index, virtualprefix, index))
-
-def createPoolPlusVirtual(index):
-    global poolerrorcount
-    global membererrorcount
-    global virtualerrorcount
-    global restpostcount
-    global restpostexecutiontime
-    port = 10000 + index
-    poolDict = {}
-    poolDict['name'] = '%s%s' % (poolprefix, index)
-    poolDict['monitor'] = '/Common/tcp_half_open'
-    if args.poolbulk:
-        poolMemberList = []
-        for member in range(1,args.poolmembers + 1):
-            memberDict = {}
-            memberDict['name'] = '%s%s:%s' % (args.poolipprefix, member, port)
-            poolMemberList.append(memberDict)
-        memberReferenceDict = {}
-        memberReferenceDict['isSubcollection'] = True
-        memberReferenceDict['items'] = poolMemberList
-        poolDict['membersReference'] = memberReferenceDict
-        restpoststarttime = time.time()
-        poolpost = bip.post('%s/ltm/pool' % (url_base), headers=contentJsonHeader, data=json.dumps(poolDict))
-        restpostexecutiontime += time.time() - restpoststarttime
-        restpostcount += 1
-    else:
-        restpoststarttime = time.time()
-        poolpost = bip.post('%s/ltm/pool' % (url_base), headers=contentJsonHeader, data=json.dumps(poolDict))
-        restpostexecutiontime += time.time() - restpoststarttime
-        restpostcount += 1
-        if poolpost.status_code == 200:
-            print ('Successfully Created Pool: %s%s' % (poolprefix, index))
-        else:
-            print ('Problem creating Pool: %s%s - response: %s' % (poolprefix, index, poolpost.content))
-            poolerrorcount
-            poolerrorcount += 1
-        for member in range(1,args.poolmembers + 1):
-            memberDict = {}
-            memberDict['name'] = '%s%s:%s' % (args.poolipprefix, member, port)
-            restpoststarttime = time.time()
-            memberpost = bip.post('%s/ltm/pool/%s%s/members' % (url_base, poolprefix, index), headers=contentJsonHeader, data=json.dumps(memberDict))
-            restpostexecutiontime += time.time() - restpoststarttime
-            restpostcount += 1
-            if memberpost.status_code == 200:
-                print ('Successfully Created Pool: %s%s Member: %s%s:%s' % (poolprefix, index, args.poolipprefix, member, port))
-            else:
-                print ('Problem creating Pool: %s%s Member: %s%s%s- response: %s' % (poolprefix, index, args.poolipprefix, member, port, memberpost.content))
-                membererrorcount += 1
-    virtualDict = {}
-    virtualDict['name'] = '%s%s' % (virtualprefix, index)
-    virtualDict['destination'] = '10.0.0.1:%s' % (port)
-    virtualDict['pool'] = '%s%s' % (poolprefix, index)
-    virtualDict['profiles'] = 'f5-tcp-lan'
-    restpoststarttime = time.time()
-    virtualpost = bip.post('%s/ltm/virtual' % (url_base), headers=contentJsonHeader, data=json.dumps(virtualDict))
-    restpostexecutiontime += time.time() - restpoststarttime
-    restpostcount += 1
-    if virtualpost.status_code == 200:
-        print ('Successfully Created Virtual: %s%s' % (virtualprefix, index))
-    else:
-        print ('Problem creating Virtual: %s%s - response: %s' % (virtualprefix, index, virtualpost.content))
-        virtualerrorcount += 1
-
 user = args.user
 password = getpass.getpass("Password for " + user + ":")
 bip = requests.session()
@@ -169,194 +100,41 @@ bip.verify = False
 requests.packages.urllib3.disable_warnings()
 url_base = ('https://%s/mgmt/tm' % (args.bigip))
 
-virtualerrorcount = 0
-poolerrorcount = 0
-membererrorcount = 0
-singlerequesttotal = 0
-singlerequestdeletetime = 0
-topskipdeletetime = 0
+if args.passthrough:
+    transactionDict = {}
+    transaction = bip.post('%s/transaction' % (url_base), headers=contentJsonHeader, data=json.dumps(transactionDict)).json()
+    transactionId = str(transaction['transId'])
+    print ('Transaction ID: %s' % (transactionId))
+    transactionPostHeaders = contentJsonHeader
+    transactionPostHeaders['X-F5-REST-Coordination-Id'] = transactionId
 
-if args.singlerequest:
-    singlerequestbuildstart = time.time()
-    for loop in range(1,args.loops + 1):
-        createpool = True
-        createvirtual = True
-        print ('Creating objects: %s' % (loop))
-        start = time.time()
-        if args.getlist:
-            restgetliststart = time.time()
-            virtuals = bip.get('%s/ltm/virtual' % (url_base) ).json()
-            restgetlistend = time.time()
-            restgetlisttime = time.time() - restgetlistend
-            restgetexecutiontime += restgetlisttime
-            if restgetlisttime > restgetworst:
-                restgetworst = restgetlisttime
-            if restgetlisttime < restgetbest:
-                restgetbest = restgetlisttime
-            restgetcount += 1
-            print ('Virtual Count: %s' % (len(virtuals['items'])))
-            for virtual in virtuals['items']:
-                if virtual['name'] == '%s%s' % (virtualprefix, loop):
-                    createvirtual = False
-                if args.itemoutput:
-                    print('Virtual Name: %s' % (virtual['name']))
-            restgetliststart = time.time()
-            pools = bip.get('%s/ltm/pool' % (url_base) ).json()
-            restgetlisttime = time.time() - restgetliststart
-            restgetexecutiontime += restgetlisttime
-            if restgetlisttime > restgetworst:
-                restgetworst = restgetlisttime
-            if restgetlisttime < restgetbest:
-                restgetbest = restgetlisttime
-            restgetcount += 1
-            print ('Pool Count: %s' % (len(pools['items'])))
-            for pool in pools['items']:
-                if pool['name'] == '%s%s' % (poolprefix, loop):
-                    createpool = False
-                if args.itemoutput:
-                    print('Pool Name: %s' % (pool['name']))
-        if createpool and createvirtual:
-            createPoolPlusVirtual(loop)
-        end = time.time()
-        runtime = end - start
-        singlerequesttotal += runtime
-        print ('Single Request Run Time: %s' % (runtime))
-        print ('Single Request Total Runtime: %s' % (singlerequesttotal))
-    singlerequestbuildend = time.time()
-    for loop in range(args.loops, 0, -1):
-        print ('Deleting objects: %s' % (loop))
-        deletePoolPlusVirtual(loop)
-    singlerequestdeleteend = time.time()
-    singlerequestdeletetime = singlerequestdeleteend - singlerequestbuildend
+for member in range(1, args.members + 1):
+    print("Loop variable: %s" % member)
+    print ("Sleeping for %s seconds" % (args.interval))
+    time.sleep(args.interval)
+    if args.passthrough:
+        print ('We are in passthrough mode')
+        poolMemberDict = { 'name': '%s.%s:80' % (args.poolipprefix, member)}
+        poolmemberadd = bip.post('%s/ltm/pool/%s/members' % (url_base, args.poolName), headers=transactionPostHeaders, data=json.dumps(poolMemberDict)).json()
 
-topskiptotal = 0
-if args.topskip:
-    topskipbuildstart = time.time()
-    for loop in range(1,args.loops + 1):
-        createpool = True
-        createvirtual = True
-        print ('Creating objects: %s' % (loop))
-        start = time.time()
-        if args.getlist:
-            restgetliststart = time.time()
-            virtuals = bip.get('%s/ltm/virtual?$top=%s' % (url_base, args.items) ).json()
-            restgetlisttime = time.time() - restgetliststart
-            if restgetlisttime > restgetworst:
-                restgetworst = restgetlisttime
-            if restgetlisttime < restgetbest:
-                restgetbest = restgetlisttime
-            restgetexecutiontime += restgetlisttime
-            restgetcount += 1
-            if virtuals.get('nextLink'):
-                done = False
-                while (not done ):
-                    itemsretrieved = len(virtuals['items'])
-                    #print ('Items retrieved: %s' % (itemsretrieved))
-                    restgetliststart = time.time()
-                    virtualpage = bip.get('%s/ltm/virtual?$top=%s&$skip=%s' % (url_base, args.items, itemsretrieved) ).json()
-                    restgetlisttime = time.time() - resgetliststart
-                    restgetexecutiontime += restgetlisttime
-                    if restgetlisttime > restgetworst:
-                        restgetworst = restgetlisttime
-                    if restgetlisttime < restgetbest:
-                        restgetbest = restgetlisttime
-                    restgetcount += 1
-                    #print ('virtualpage item count: %s' % (len(virtualpage['items'])))
-                    for item in virtualpage['items']:
-                        virtuals['items'].append(item)
-                    #virtuals['items'].append(virtualpage['items'])
-                    if not virtualpage.get('nextLink'):
-                        done = True
-                        #print ('Got all items')
-            print ('Virtual Count: %s' % (len(virtuals['items'])))
-            for item in virtuals['items']:
-                if virtual['name'] == '%s%s' % (virtualprefix, loop):
-                    createvirtual = False
-                if args.itemoutput:
-                    print ('Virtual Name: %s' % (item['name']))
-            restgetliststart = time.time()
-            pools = bip.get('%s/ltm/pool?$top=%s' % (url_base, args.items) ).json()
-            restgetlisttime = time.time() - resgetliststart
-            restgetexecutiontime += restgetlisttime
-            if restgetlisttime > restgetworst:
-                restgetworst = restgetlisttime
-            if restgetlisttime < restgetbest:
-                restgetbest = restgetlisttime
-            restgetcount += 1
-            if pools.get('nextLink'):
-                done = False
-                while (not done ):
-                    itemsretrieved = len(pools['items'])
-                    #print ('Items retrieved: %s' % (itemsretrieved))
-                    restgetliststart = time.time()
-                    poolpage = bip.get('%s/ltm/pool?$top=%s&$skip=%s' % (url_base, args.items, itemsretrieved) ).json()
-                    restgetlisttime = time.time() - resgetliststart
-                    restgetexecutiontime += restgetlisttime
-                    if restgetlisttime > restgetworst:
-                        restgetworst = restgetlisttime
-                    if restgetlisttime < restgetbest:
-                        restgetbest = restgetlisttime
-                    restgetcount += 1
-                    #print ('poolpage item count: %s' % (len(poolpage['items'])))
-                    for item in poolpage['items']:
-                        pools['items'].append(item)
-                    #virtuals['items'].append(virtualpage['items'])
-                    if not poolpage.get('nextLink'):
-                        done = True
-            print ('Pool Count: %s' % (len(pools['items'])))
-            for item in pools['items']:
-                if pool['name'] == '%s%s' % (poolprefix, loop):
-                    createpool = False
-                if args.itemoutput:
-                    print ('Pool Name: %s' % (item['name']))
-        if createpool and createvirtual:
-            createPoolPlusVirtual(loop)
-        end = time.time()
-        runtime = end - start
-        print ('Top/Skip Run Time: %s' % (runtime))
-        topskiptotal += runtime
-        print ('Top Skip Total Runtime: %s' % (topskiptotal))
-    topskipbuildend = time.time()
-    for loop in range(args.loops, 0, -1):
-        print ('Deleting objects: %s' % (loop))
-        deletePoolPlusVirtual(loop)
-    topskipdeleteend = time.time()
-    topskipdeletetime = topskipdeleteend - topskipbuildend
+if args.defer:
+    transactionDict = {}
+    transaction = bip.post('%s/transaction' % (url_base), headers=contentJsonHeader, data=json.dumps(transactionDict)).json()
+    transactionId = str(transaction['transId'])
+    print ('Transaction ID: %s' % (transactionId))
+    transactionPostHeaders = contentJsonHeader
+    transactionPostHeaders['X-F5-REST-Coordination-Id'] = transactionId
+    for member in range(1, args.members + 1):
+        print("Loop variable: %s" % member)
+        poolMemberDict = { 'name': '%s.%s:80' % (args.poolipprefix, member)}
+        poolmemberadd = bip.post('%s/ltm/pool/%s/members' % (url_base, args.poolName), headers=transactionPostHeaders, data=json.dumps(poolMemberDict)).json()
+
+
+## Submit the transaction
+submitTransactionPayload = {}
+submitTransactionPayload['state'] = "VALIDATING"
+submitTransaction = bip.patch('%s/transaction/%s' % (url_base, transactionId), headers=contentJsonHeader, data=json.dumps(submitTransactionPayload)).json()
+
 
 scriptend = time.time()
 scriptruntime = scriptend - scriptbegin
-if args.singlerequest:
-    singlerequestbuildtime = singlerequestbuildend - singlerequestbuildstart
-else:
-    singlerequestbuildtime = 0
-if args.topskip:
-    topskipbuildtime = topskipbuildend - topskipbuildstart
-else:
-    topskipbuildtime = 0
-buildtime = singlerequestbuildtime + topskipbuildtime
-restpostrps = restpostcount / buildtime
-deletetime = singlerequestdeletetime + topskipdeletetime
-deleterps = restdeletecount / deletetime
-
-print ('Total REST GET requests: %s' % (restgetcount))
-if args.getlist:
-    restgetresponsetime = restgetexecutiontime / restgetcount
-    print ('Average REST GET response time: %s' % (restgetresponsetime))
-    print ('Best REST GET response time: %s' % (restgetbest))
-    print ('Worst REST GET response time: %s' % (restgetworst))
-print ('Total REST POST requests: %s' % (restpostcount))
-restpostresponsetime = restpostexecutiontime / restpostcount
-print ('Average POST request response time: %s' % (restpostresponsetime))
-print ('Total REST DELETE requests: %s' % (restdeletecount))
-restrequests = restgetcount + restpostcount + restdeletecount
-print ('POST requests per second: %s' % (restpostrps))
-print ('DELETE requests per second: %s' % (deleterps))
-print ('Total REST requests: %s' % (restrequests))
-print ('Script execution time: %s' % (scriptruntime))
-requestspersec = restrequests / scriptruntime
-print ('Script REST requests per second: %s' % (requestspersec))
-print ('Single Request Total Runtime: %s' % (singlerequesttotal))
-print ('Top Skip Total Runtime: %s' % (topskiptotal))
-print ('Virtual Error Count: %s' % (virtualerrorcount))
-print ('Pool Error Count: %s' % (poolerrorcount))
-print ('Member Error Count: %s' % (membererrorcount))
