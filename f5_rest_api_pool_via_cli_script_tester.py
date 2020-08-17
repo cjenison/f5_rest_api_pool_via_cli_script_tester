@@ -40,6 +40,7 @@ def query_yes_no(question, default="no"):
 parser = argparse.ArgumentParser(description='A tool to measure bulk pool adds/removes')
 parser.add_argument('--bigip', help='IP or hostname of BIG-IP Management or Self IP', required=True)
 parser.add_argument('--user', help='username to use for authentication', required=True)
+parser.add_argument('--password', help='password for BIG-IP REST authentication')
 parser.add_argument('--poolName', help='BIG-IP Pool Name to Modify', required=True)
 parser.add_argument('--members', help='Number of members to add or remove', type=int, default=10)
 mode = parser.add_mutually_exclusive_group(required=True)
@@ -89,7 +90,11 @@ def get_auth_token(bigip, username, password):
     return token
 
 user = args.user
-password = getpass.getpass("Password for " + user + ":")
+print ('Args.password: %s' % (args.password))
+if args.password == '':
+    password = getpass.getpass("Password for " + user + ":")
+else:
+    password = args.password
 bip = requests.session()
 token = get_auth_token(args.bigip, args.user, password)
 if token and token != 'Fail':
@@ -105,7 +110,7 @@ if args.passthrough:
     transaction = bip.post('%s/transaction' % (url_base), headers=contentJsonHeader, data=json.dumps(transactionDict)).json()
     transactionId = str(transaction['transId'])
     print ('Transaction ID: %s' % (transactionId))
-    transactionPostHeaders = contentJsonHeader
+    transactionPostHeaders = contentJsonHeader.copy()
     transactionPostHeaders['X-F5-REST-Coordination-Id'] = transactionId
 
 for member in range(1, args.members + 1):
@@ -122,7 +127,7 @@ if args.defer:
     transaction = bip.post('%s/transaction' % (url_base), headers=contentJsonHeader, data=json.dumps(transactionDict)).json()
     transactionId = str(transaction['transId'])
     print ('Transaction ID: %s' % (transactionId))
-    transactionPostHeaders = contentJsonHeader
+    transactionPostHeaders = contentJsonHeader.copy()
     transactionPostHeaders['X-F5-REST-Coordination-Id'] = transactionId
     for member in range(1, args.members + 1):
         print("Loop variable: %s" % member)
@@ -135,6 +140,7 @@ submitTransactionPayload = {}
 submitTransactionPayload['state'] = "VALIDATING"
 print ("Submit Transaction Payload: %s" % (submitTransactionPayload))
 submitTransaction = bip.patch('%s/transaction/%s' % (url_base, transactionId), headers=contentJsonHeader, data=json.dumps(submitTransactionPayload)).json()
+print ("SubmitTransaction: %s" % submitTransaction)
 
 
 
